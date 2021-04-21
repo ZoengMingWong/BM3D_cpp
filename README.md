@@ -63,7 +63,7 @@ Only the 1D Hadamard transform is provided at present for the transformation of 
 | --- | --- | --- |
 | 2D patch size | 8x8 | now only support 8x8 |
 | patch step size | 3 | configurable |
-| searching window size | 39x39 | no need to be a square |
+| searching window size | 33x33 | no need to be a square |
 | max 3D group size | 16 | configurable (power of 2) |
 | 2D transform | 2D Bior-1.5 | now only support 8x8 |
 | 1D transform | 1D Hadamard | relative to the group size |
