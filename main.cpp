@@ -4,17 +4,17 @@
 #include "cbm3d.h"
 using namespace std;
 
-float get_psnr(ImageType *img1, ImageType *img2, int pixels, ImageType vmax)
+double get_psnr(ImageType *img1, ImageType *img2, int pixels, ImageType vmax)
 {
-	float mse = 0;
-	float diff;
+	double mse = 0;
+	double diff;
 	for (int i = 0; i < pixels; i++)
 	{
-		diff = (float)img1[i] - img2[i];
+		diff = (double)img1[i] - (double)img2[i];
 		mse += diff * diff;
 	}
 	mse /= pixels;
-	return (10 * log10f((float)vmax * vmax / mse));
+	return (10 * log10((double)vmax * vmax / mse));
 }
 
 FILE *openfile(const char *fname, const char *mode)
