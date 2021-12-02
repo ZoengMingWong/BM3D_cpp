@@ -33,7 +33,7 @@ public:
 		int swinrv_ = 16,			// vertical search window radius
 		int sstepv_ = 1				// vertical search step
 	);
-	~BM3D();
+	virtual ~BM3D();
 
 	/* Load a new grayscale image and reset the buffers. */
 	virtual void load(
