@@ -2,6 +2,7 @@
 #include <string>
 #include <math.h>
 #include "cbm3d.h"
+#include "cbm3d_wiener.h"
 using namespace std;
 
 double get_psnr(ImageType *img1, ImageType *img2, int pixels, ImageType vmax)
@@ -31,9 +32,12 @@ FILE *openfile(const char *fname, const char *mode)
 int main()
 {
 	int w = 512, h = 512;
-	int chnl = 3;		// YUV 4:0:0 or 4:4:4
+	int chnl = 3;			// YUV 4:0:0 or 4:4:4
 
-	int sigma = 36;		// same for Y/U/V, can be different
+	int en_bm3d_step2 = 1;	// enable step2 of bm3d
+	int sigma_step1 = 36;	// here same for Y/U/V, can be different
+	int sigma_step2 = 96;	// bigger for smoother, usually a much bigger value than step1 would have better psnr
+
 	int frames = 1;		// frames to process
 
 	// ground truth
@@ -48,6 +52,8 @@ int main()
 	ImageType *noisy = new ImageType[w * h * chnl];
 	ImageType *clean = new ImageType[w * h * chnl];
 
+	/* hard-thresholding denoiser
+	 */ 
 	BM3D *denoiser = NULL;
 	if (chnl == 1) {
 		// used for YUV 4:0:0
@@ -57,24 +63,53 @@ int main()
 		denoiser = new CBM3D(w, h, 16, 8, 3, 16, 1, 16, 1);
 	}
 
+	/* wiener-filtering denoiser
+	 * Note that Step2 is independent of Step1, except the basic denoised image.
+	 * So you can even just process the Y component in Step2, and reuse the U/V result from Step1.
+	 */
+	BM3D_WIE* denoiser_wie = NULL;
+	if (chnl == 1) {
+		// used for YUV 4:0:0
+		denoiser_wie = new BM3D_WIE(w, h, 16, 8, 3, 16, 1, 16, 1); // at present the psize must be 8
+	}
+	else {
+		// used for YUV 4;4:4
+		denoiser_wie = new CBM3D_WIE(w, h, 16, 8, 3, 16, 1, 16, 1);
+	}
+
 	int frame = 0;
 	while (frames < 0 ||frame < frames)
 	{
 		if (fread(noisy, sizeof(ImageType), w * h * chnl, inf) != w * h * chnl) break;
 		cout << "Processing frame " << frame << "..." << endl;
 
-		denoiser->load(noisy, sigma);
+		// hard thresholding
+		denoiser->load(noisy, sigma_step1);
 		denoiser->run(clean);
 
 		cout << "noisy PSNR: "    << get_psnr(noisy, gt, w*h*chnl, 255) << "    "
 			 << "denoised PSNR: " << get_psnr(clean, gt, w*h*chnl, 255) << endl;
 
 		fwrite(clean, sizeof(ImageType), w * h * chnl, ouf);
+
+		if (en_bm3d_step2)
+		{
+			// wiener filtering
+			denoiser_wie->load(noisy, clean, sigma_step2);
+			denoiser_wie->run(clean);
+
+			cout << "noisy PSNR: " << get_psnr(noisy, gt, w * h * chnl, 255) << "    "
+				<< "wiener denoised PSNR: " << get_psnr(clean, gt, w * h * chnl, 255) << endl;
+
+			fwrite(clean, sizeof(ImageType), w * h * chnl, ouf);
+		}
+
 		cout << "Frame " << frame << " done!" << endl << endl;
 		frame++;
 	}
 
 	delete denoiser;
+	delete denoiser_wie;
 
 	fclose(gtf);
 	delete[] gt;

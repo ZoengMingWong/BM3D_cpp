@@ -1,5 +1,5 @@
 #include <iostream>
-#include "cbm3d.h"
+#include "cbm3d_wiener.h"
 
 static inline DistType get_dist(ImageType a, ImageType b)
 {
@@ -11,7 +11,7 @@ static inline DistType get_dist(ImageType a, ImageType b)
 #endif
 }
 
-CBM3D::CBM3D(
+CBM3D_WIE::CBM3D_WIE(
 	int w_,					// width
 	int h_,					// height
 	int max_sim,			// maximum similar patches
@@ -21,36 +21,40 @@ CBM3D::CBM3D(
 	int ssteph_,			// horizontal search step
 	int swinrv_,			// vertical search window radius
 	int sstepv_				// vertical search step
-) : BM3D(w_, h_, max_sim, psize_, pstep_, swinrh_, ssteph_, swinrv_, sstepv_)
+) : BM3D_WIE(w_, h_, max_sim, psize_, pstep_, swinrh_, ssteph_, swinrv_, sstepv_)
 {
 	noisy_yuv[0]       = noisy;
+	basic_yuv[0]	   = basic;
 	numerator_yuv[0]   = numerator;
 	denominator_yuv[0] = denominator;
 
 	for (int i = 1; i < 3; i++)
 	{
 		noisy_yuv[i]       = new ImageType[w * h]();
+		basic_yuv[i]	   = new ImageType[w * h]();
 		numerator_yuv[i]   = new PatchType[w * (psize + swinrv * 2)];
 		denominator_yuv[i] = new PatchType[w * (psize + swinrv * 2)];
 	}
 }
 
-CBM3D::~CBM3D()
+CBM3D_WIE::~CBM3D_WIE()
 {
 	for (int i = 1; i < 3; i++)
 	{
 		delete[] noisy_yuv[i];
+		delete[] basic_yuv[i];
 		delete[] numerator_yuv[i];
 		delete[] denominator_yuv[i];
 	}
 
 	// the ~BM3D is called after the ~CBM3D
 	noisy       = noisy_yuv[0];
+	basic	    = basic_yuv[0];
 	numerator   = numerator_yuv[0];
 	denominator = denominator_yuv[0];
 }
 
-void CBM3D::reset()
+void CBM3D_WIE::reset()
 {
 	row_cnt = 0;
 	for (int i = 0; i < 3; i++)
@@ -60,30 +64,33 @@ void CBM3D::reset()
 	}
 }
 
-void CBM3D::load(ImageType *org_noisy_yuv, int sigmay, DistType max_mdist, int sigmau, int sigmav)
+void CBM3D_WIE::load(ImageType *org_noisy_yuv, ImageType* org_basic_yuv, int sigmay, DistType max_mdist, int sigmau, int sigmav)
 {
 	for (int i = 0; i < 3; i++)
 	{
 		noisy       = noisy_yuv[i];
+		basic		= basic_yuv[i];
 		numerator   = numerator_yuv[i];
 		denominator = denominator_yuv[i];
 
-		BM3D::load(org_noisy_yuv, sigmay, max_mdist);
+		BM3D_WIE::load(org_noisy_yuv, org_basic_yuv, sigmay, max_mdist);
 		org_noisy_yuv += (orig_w * orig_h);
+		org_basic_yuv += (orig_w * orig_h);
 	}
 
-	hard_thres[0] = (PatchType)(HARD_THRES_MULTIPLIER * sigmay) * (1 << COEFF_DICI_BITS);
-	hard_thres[1] = sigmau < 0 ? hard_thres[0] : (PatchType)(HARD_THRES_MULTIPLIER * sigmau) * (1 << COEFF_DICI_BITS);
-	hard_thres[2] = sigmav < 0 ? hard_thres[0] : (PatchType)(HARD_THRES_MULTIPLIER * sigmav) * (1 << COEFF_DICI_BITS);
+	wie_thres[0] = sigmay * sigmay * (1 << (COEFF_DICI_BITS * 2));
+	wie_thres[1] = sigmau < 0 ? wie_thres[0] : sigmau * sigmau * (1 << (COEFF_DICI_BITS * 2));
+	wie_thres[2] = sigmav < 0 ? wie_thres[0] : sigmav * sigmav * (1 << (COEFF_DICI_BITS * 2));
 }
 
-int CBM3D::next_line(ImageType *clean)
+int CBM3D_WIE::next_line(ImageType *clean)
 {
 	if (row_cnt >= orig_h + pstep - psize) return -1;	// beyond the last line of reference patches
 
 	for (int i = 0; i < 3; i++)
 	{
-		refer_yuv[i] = noisy_yuv[i]       + swinrh + (row_cnt + swinrv) * w;
+		refer_noisy_yuv[i] = noisy_yuv[i] + swinrh + (row_cnt + swinrv) * w;
+		refer_basic_yuv[i] = basic_yuv[i] + swinrh + (row_cnt + swinrv) * w;
 		numer_yuv[i] = numerator_yuv[i]   + swinrh + swinrv * w;
 		denom_yuv[i] = denominator_yuv[i] + swinrh + swinrv * w;
 	}
@@ -100,7 +107,7 @@ int CBM3D::next_line(ImageType *clean)
 			int idx = (sy + swinrv) / sstepv * nsh + (sx + swinrh) / ssteph;
 			for (int y = 0; y < psize; y++) {
 				for (int x = 0; x < psize - pstep; x++) {
-					dist_buf[nbuf * idx + x / pstep] += get_dist(refer_yuv[0][y * w + x], refer_yuv[0][(y + sy) * w + x + sx]);
+					dist_buf[nbuf * idx + x / pstep] += get_dist(refer_basic_yuv[0][y * w + x], refer_basic_yuv[0][(y + sy) * w + x + sx]);
 				}
 			}
 			for (int i = 0; i < nbuf - 2; i++) {
@@ -114,11 +121,12 @@ int CBM3D::next_line(ImageType *clean)
 	// proceesing the line
 	for (int x = 0; x < orig_w + pstep - psize; x += pstep, ncnt++)
 	{
-		refer = refer_yuv[0];
+		refer_noisy = refer_noisy_yuv[0];
+		refer_basic = refer_basic_yuv[0];
 		numer = numer_yuv[0];
 		denom = denom_yuv[0];
 
-		g3d->thres = hard_thres[0];
+		g3d_basic->thres = wie_thres[0];
 
 		t = clock();
 		grouping();
@@ -134,14 +142,16 @@ int CBM3D::next_line(ImageType *clean)
 
 		for (int i = 1; i < 3; i++)
 		{
-			refer = refer_yuv[i];
+			refer_noisy = refer_noisy_yuv[i];
+			refer_basic = refer_basic_yuv[i];
 			numer = numer_yuv[i];
 			denom = denom_yuv[i];
 
-			g3d->thres = hard_thres[i];
+			g3d_basic->thres = wie_thres[i];
 
 			t = clock();
-			g3d->fill_patches_values(refer, w);
+			g3d_noisy->fill_patches_values(refer_noisy, w);
+			g3d_basic->fill_patches_values(refer_basic, w);
 			gtime += clock() - t;
 
 			t = clock();
@@ -155,7 +165,8 @@ int CBM3D::next_line(ImageType *clean)
 
 		for (int i = 0; i < 3; i++)
 		{
-			refer_yuv[i] += pstep;
+			refer_noisy_yuv[i] += pstep;
+			refer_basic_yuv[i] += pstep;
 			numer_yuv[i] += pstep;
 			denom_yuv[i] += pstep;
 		}

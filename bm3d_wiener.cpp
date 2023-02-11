@@ -1,29 +1,5 @@
 #include <iostream>
-#include "bm3d.h"
-
-#if USE_INTEGER
-const PatchType Kaiser[64] = {
-	3,	5,	6,  7,  7,  6,  5, 3,
-	5,	7,  9, 10, 10,  9,  7, 5,
-	6,  9, 12, 13, 13, 12,  9, 6,
-	7, 10, 13, 15, 15, 13, 10, 7,
-	7, 10, 13, 15, 15, 13, 10, 7,
-	6,  9, 12, 13, 13, 12,  9, 6,
-	5,  7,  9, 10, 10,  9,  7, 5,
-	3,  5,  6,  7,  7,  6,  5, 3 
-};
-#else
-const PatchType Kaiser[64] = {
-	0.1924f, 0.2989f, 0.3846f, 0.4325f, 0.4325f, 0.3845f, 0.2989f, 0.1924f,
-	0.2989f, 0.4642f, 0.5974f, 0.6717f, 0.6717f, 0.5974f, 0.4642f, 0.2989f,
-	0.3846f, 0.5974f, 0.7688f, 0.8644f, 0.8644f, 0.7689f, 0.5974f, 0.3846f,
-	0.4325f, 0.6717f, 0.8644f, 0.9718f, 0.9718f, 0.8644f, 0.6717f, 0.4325f,
-	0.4325f, 0.6717f, 0.8644f, 0.9718f, 0.9718f, 0.8644f, 0.6717f, 0.4325f,
-	0.3846f, 0.5974f, 0.7688f, 0.8644f, 0.8644f, 0.7689f, 0.5974f, 0.3846f,
-	0.2989f, 0.4642f, 0.5974f, 0.6717f, 0.6717f, 0.5974f, 0.4642f, 0.2989f,
-	0.1924f, 0.2989f, 0.3846f, 0.4325f, 0.4325f, 0.3845f, 0.2989f, 0.1924f
-};
-#endif
+#include "bm3d_wiener.h"
 
 static inline DistType get_dist(ImageType a, ImageType b)
 {
@@ -35,7 +11,7 @@ static inline DistType get_dist(ImageType a, ImageType b)
 #endif
 }
 
-BM3D::BM3D(
+BM3D_WIE::BM3D_WIE(
 	int w_,					// width
 	int h_,					// height
 	int max_sim,			// maximum similar patches
@@ -56,8 +32,10 @@ BM3D::BM3D(
 	w = orig_w + w_pad + swinrh * 2;
 	h = orig_h + h_pad + swinrv * 2;
 
-	g3d   = new Group3D(psize, psize, max_sim);
+	g3d_noisy = new Group3D(psize, psize, max_sim);
+	g3d_basic = new Group3D(psize, psize, max_sim);
 	noisy = new ImageType[w * h]();
+	basic = new ImageType[w * h]();
 
 	numerator   = new PatchType[w * (psize + swinrv * 2)];
 	denominator = new PatchType[w * (psize + swinrv * 2)];
@@ -73,17 +51,19 @@ BM3D::BM3D(
 	row_cnt = h;	// avoid processing without the noisy image initialization
 }
 
-BM3D::~BM3D()
+BM3D_WIE::~BM3D_WIE()
 {
-	delete g3d;
+	delete g3d_noisy;
+	delete g3d_basic;
 	delete[] noisy;
+	delete[] basic;
 	delete[] numerator;
 	delete[] denominator;
 	delete[] dist_buf;
 	delete[] dist_sum;
 }
 
-void BM3D::run(ImageType *clean)
+void BM3D_WIE::run(ImageType *clean)
 {
 	gtime = 0;
 	ftime = 0;
@@ -106,37 +86,45 @@ void BM3D::run(ImageType *clean)
 			  << (double)atime / stime * 100 << std::endl;
 }
 
-void BM3D::reset()
+void BM3D_WIE::reset()
 {
 	row_cnt = 0;
 	memset(numerator,   0, (psize + swinrv * 2) * w * sizeof(PatchType));
 	memset(denominator, 0, (psize + swinrv * 2) * w * sizeof(PatchType));
 }
 
-void BM3D::load(ImageType *org_noisy, int sigma, DistType max_mdist, int sigmau, int sigmav)
+void BM3D_WIE::load(ImageType *org_noisy, ImageType *org_basic, int sigma, DistType max_mdist, int sigmau, int sigmav)
 {
 	row_cnt = 0;
-	g3d->set_thresholds(sigma, max_mdist * psize * psize);
+	g3d_basic->max_dist = max_mdist * psize * psize;
+	g3d_basic->thres = sigma * sigma * (1 << (COEFF_DICI_BITS * 2));
 
 	int w_pad = w - 2 * swinrh - orig_w;
 	int h_pad = h - 2 * swinrv - orig_h;
 
 	ImageType *tmp_noisy = noisy + swinrv * w + swinrh;
+	ImageType *tmp_basic = basic + swinrv * w + swinrh;
 	for (int i = 0; i < orig_h; i++)
 	{
 		memcpy(tmp_noisy, org_noisy, orig_w * sizeof(ImageType));
+		memcpy(tmp_basic, org_basic, orig_w * sizeof(ImageType));
 		for (int j = 0; j < w_pad; j++)
 		{
 			// edge padding
 			tmp_noisy[orig_w + j] = tmp_noisy[orig_w + j - 1];
+			tmp_basic[orig_w + j] = tmp_basic[orig_w + j - 1];
 		}
 		tmp_noisy += w;
+		tmp_basic += w;
 		org_noisy += orig_w;
+		org_basic += orig_w;
 	}
 	for (int i = 0; i < h_pad; i++)
 	{
 		memcpy(tmp_noisy, tmp_noisy - w, (orig_w + w_pad) * sizeof(ImageType));
+		memcpy(tmp_basic, tmp_basic - w, (orig_w + w_pad) * sizeof(ImageType));
 		tmp_noisy += w;
+		tmp_basic += w;
 	}
 	memset(numerator,   0, (psize + swinrv * 2) * w * sizeof(PatchType));
 	memset(denominator, 0, (psize + swinrv * 2) * w * sizeof(PatchType));
@@ -154,11 +142,13 @@ void BM3D::load(ImageType *org_noisy, int sigma, DistType max_mdist, int sigmau,
  * so that the (this->row_cnt) increases step by step from 0 to the end of the image, 
  * as the numerator/denominator buffer records only partial information and updates progressively.
  */
-int BM3D::next_line(ImageType *clean)
+int BM3D_WIE::next_line(ImageType *clean)
 {
 	if (row_cnt >= orig_h + pstep - psize) return -1;	// beyond the last line of reference patches
 
-	refer = noisy + (row_cnt + swinrv) * w + swinrh;	// the first reference patch of the line
+	refer_noisy = noisy + (row_cnt + swinrv) * w + swinrh;	// the first reference patch of the line
+	refer_basic = basic + (row_cnt + swinrv) * w + swinrh;	// the first reference patch of the line
+
 	numer = numerator   + swinrv * w + swinrh;
 	denom = denominator + swinrv * w + swinrh;
 
@@ -176,7 +166,7 @@ int BM3D::next_line(ImageType *clean)
 			{
 				for (int x = 0; x < psize - pstep; x++)
 				{
-					dist_buf[nbuf * idx + x / pstep] += get_dist(refer[y * w + x], refer[(y + sy) * w + x + sx]);
+					dist_buf[nbuf * idx + x / pstep] += get_dist(refer_basic[y * w + x], refer_basic[(y + sy) * w + x + sx]);
 				}
 			}
 			for (int i = 0; i < nbuf - 2; i++) {
@@ -202,7 +192,8 @@ int BM3D::next_line(ImageType *clean)
 		aggregation();
 		atime += clock() - t;
 
-		refer += pstep;
+		refer_noisy += pstep;
+		refer_basic += pstep;
 		numer += pstep;
 		denom += pstep;
 	}
@@ -251,7 +242,7 @@ int BM3D::next_line(ImageType *clean)
 	return output_rows;
 }
 
-void BM3D::grouping()
+void BM3D_WIE::grouping()
 {
 #pragma omp parallel for num_threads(USE_THREADS_NUM)
 	for (int sy = -swinrv; sy <= swinrv; sy += sstepv)
@@ -263,7 +254,7 @@ void BM3D::grouping()
 			{
 				for (int x = psize - pstep; x < psize; x++)
 				{
-					dist_buf[nbuf * idx + (ncnt + x / pstep) % nbuf] += get_dist(refer[y * w + x], refer[(y + sy) * w + x + sx]);
+					dist_buf[nbuf * idx + (ncnt + x / pstep) % nbuf] += get_dist(refer_basic[y * w + x], refer_basic[(y + sy) * w + x + sx]);
 				}
 			}
 			dist_sum[idx] += dist_buf[nbuf * idx + (ncnt - 2) % nbuf];
@@ -271,14 +262,22 @@ void BM3D::grouping()
 		}
 	}
 
-	g3d->set_reference();
+	g3d_noisy->set_reference();
+	g3d_basic->set_reference();
+
 	for (int idx = 0, sy = -swinrv; sy <= swinrv; sy += sstepv)
 	{
 		for (int sx = -swinrh; sx <= swinrh; sx += ssteph, idx++)
 		{
-			g3d->insert_patch(sx, sy, dist_sum[idx]);
+			g3d_basic->insert_patch(sx, sy, dist_sum[idx]);
 		}
 	}
+	g3d_noisy->num = g3d_basic->num;
+	for (int p = 0; p < g3d_basic->num; p++)
+	{
+		g3d_noisy->patch[p]->update(g3d_basic->patch[p]->x, g3d_basic->patch[p]->y, 0);
+	}
+
 #pragma omp parallel for num_threads(USE_THREADS_NUM)
 	for (int i = 0; i < nsv; i++)
 	{
@@ -291,35 +290,55 @@ void BM3D::grouping()
 		}
 	}
 
-	g3d->fill_patches_values(refer, w);
+	g3d_noisy->fill_patches_values(refer_noisy, w);
+	g3d_basic->fill_patches_values(refer_basic, w);
 }
 
-void BM3D::filtering()
+void BM3D_WIE::filtering()
 {
-	g3d->transform_3d();
-	g3d->hard_thresholding();
-	g3d->inv_transform_3d();
-}
+	g3d_noisy->transform_3d();
+	g3d_basic->transform_3d();
 
-void BM3D::aggregation()
-{
-	PatchType weight = g3d->get_weight();
-	for (int p = 0; p < g3d->num; p++)
+	// wiener filtering
+	double wie_wgt = 0.;
+	for (int p = 0; p < g3d_basic->num; p++)
 	{
-		int x = g3d->patch[p]->x;
-		int y = g3d->patch[p]->y;
+		for (int i = 0; i < psize * psize; i++)
+		{
+			wie_wgt = (double)g3d_basic->patch[p]->values[i] * g3d_basic->patch[p]->values[i];
+			wie_wgt = wie_wgt / (wie_wgt + g3d_basic->thres);
+			wie_wgt_sum += wie_wgt;
+			g3d_noisy->patch[p]->values[i] = (PatchType)((double)g3d_noisy->patch[p]->values[i] * wie_wgt);
+		}
+	}
+
+	g3d_noisy->inv_transform_3d();
+}
+
+void BM3D_WIE::aggregation()
+{
+#if USE_INTEGER
+	PatchType weight = 1;
+#else
+	PatchType weight = 64. / wie_wgt_sum;
+#endif
+
+	for (int p = 0; p < g3d_noisy->num; p++)
+	{
+		int x = g3d_noisy->patch[p]->x;
+		int y = g3d_noisy->patch[p]->y;
 		for (int i = 0, r = 0; r < psize; r++)
 		{
 			for (int c = 0; c < psize; c++, i++)
 			{
-				numer[(r + y) * w + c + x] += Kaiser[i] * weight * g3d->patch[p]->values[i];
+				numer[(r + y) * w + c + x] += Kaiser[i] * weight * g3d_noisy->patch[p]->values[i];
 				denom[(r + y) * w + c + x] += Kaiser[i] * weight;
 			}
 		}
 	}
 }
 
-void BM3D::shift_numer_denom()
+void BM3D_WIE::shift_numer_denom()
 {
 	numer = numerator;
 	denom = denominator;
