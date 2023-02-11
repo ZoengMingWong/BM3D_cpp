@@ -299,6 +299,8 @@ void BM3D_WIE::filtering()
 	g3d_noisy->transform_3d();
 	g3d_basic->transform_3d();
 
+	// the Hadamard transform in g3d has not been normalized
+	double noisy_variance = g3d_basic->thres * g3d_basic->num;
 	// wiener filtering
 	double wie_wgt = 0.;
 	for (int p = 0; p < g3d_basic->num; p++)
@@ -306,7 +308,7 @@ void BM3D_WIE::filtering()
 		for (int i = 0; i < psize * psize; i++)
 		{
 			wie_wgt = (double)g3d_basic->patch[p]->values[i] * g3d_basic->patch[p]->values[i];
-			wie_wgt = wie_wgt / (wie_wgt + g3d_basic->thres);
+			wie_wgt = wie_wgt / (wie_wgt + noisy_variance);
 			wie_wgt_sum += wie_wgt;
 			g3d_noisy->patch[p]->values[i] = (PatchType)((double)g3d_noisy->patch[p]->values[i] * wie_wgt);
 		}

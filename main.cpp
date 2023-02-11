@@ -36,7 +36,7 @@ int main()
 
 	int en_bm3d_step2 = 1;	// enable step2 of bm3d
 	int sigma_step1 = 36;	// here same for Y/U/V, can be different
-	int sigma_step2 = 96;	// bigger for smoother, usually a much bigger value than step1 would have better psnr
+	int sigma_step2 = 25;	// bigger for smoother, usually a little smaller than step1
 
 	int frames = 1;		// frames to process
 
@@ -70,11 +70,11 @@ int main()
 	BM3D_WIE* denoiser_wie = NULL;
 	if (chnl == 1) {
 		// used for YUV 4:0:0
-		denoiser_wie = new BM3D_WIE(w, h, 16, 8, 3, 16, 1, 16, 1); // at present the psize must be 8
+		denoiser_wie = new BM3D_WIE(w, h, 32, 8, 3, 16, 1, 16, 1); // at present the psize must be 8
 	}
 	else {
 		// used for YUV 4;4:4
-		denoiser_wie = new CBM3D_WIE(w, h, 16, 8, 3, 16, 1, 16, 1);
+		denoiser_wie = new CBM3D_WIE(w, h, 32, 8, 3, 16, 1, 16, 1);
 	}
 
 	int frame = 0;

@@ -71,7 +71,7 @@ Only the 1D Hadamard transform is provided at present for the transformation of 
 | 2D transform | 2D Bior-1.5 | now only support 8x8 |
 | 1D transform | 1D Hadamard | relative to the group size |
 | hard threshold (step1) | 2.7 * sigma | configurable |
-| wiener sigma (step2) | sigma_wie | can be same as sigma of step1, but bigger is always better |
+| wiener sigma (step2) | sigma_wie | usually be same as sigma of step1 |
 | max mean L2 distance | 2500 | L1 is also ok |
 
 > If you can read Chinese, welcome to my blog [《传统图像降噪算法之BM3D原理详解》](https://blog.csdn.net/qq_33552519/article/details/108632146) to have a better understanding of the BM3D algorithm.
@@ -83,7 +83,7 @@ import numpy as np
 h, w, c = gt.shape
 noisy = np.clip(gt + np.random.randn(h, w, c) * sigma, 0, 255)
 ```
-I have convert the RGB images to YUV 4:4:4 files, and the PSNR of noisy image in YUV sapce is 19.49 dB. Note that the sigma of the Y/U/V is not the same as the R/G/B, which is relative to the conversion matrix. For example, if `Y = a*R + b*G + c*B`, we can compute that `sigmaY = sqrt(a*a + b*b + c*c) * sigmaR/G/B`, similarly for the U and V. Here we simply use the same sigma for Y/U/V and have tried out the `sigma=36` for a best PSNR (33.67 dB) in the YUV space for Step1. However, we set `sigma_wie=96` for Step2 to have a smoother result, and a better PSNR (34.04 dB) as well.
+I have convert the RGB images to YUV 4:4:4 files, and the PSNR of noisy image in YUV sapce is 19.49 dB. Note that the sigma of the Y/U/V is not the same as the R/G/B, which is relative to the conversion matrix. For example, if `Y = a*R + b*G + c*B`, we can compute that `sigmaY = sqrt(a*a + b*b + c*c) * sigmaR/G/B`, similarly for the U and V. Here we simply use the same sigma for Y/U/V and have tried out the `sigma=36` for a best PSNR (33.67 dB) in the YUV space for Step1. However, we set `sigma_wie=25` for Step2 to have a smoother result, and a better PSNR (34.16 dB) as well.
 
 ![ground truth](./test/image_Lena512rgb.png)
 <center><p>ground truth</p></center>
@@ -94,5 +94,5 @@ I have convert the RGB images to YUV 4:4:4 files, and the PSNR of noisy image in
 ![denoised (YUV PSNR: 33.67)](./test/lena_deno.png)
 <center><p>denoised Step1 (YUV PSNR: 33.67)</p></center>
 
-![denoised (YUV PSNR: 33.67)](./test/lena_deno_step2.png)
-<center><p>denoised Step2 (YUV PSNR: 34.04)</p></center>
+![denoised (YUV PSNR: 34.16)](./test/lena_deno_step2.png)
+<center><p>denoised Step2 (YUV PSNR: 34.16)</p></center>
