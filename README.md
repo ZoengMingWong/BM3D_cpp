@@ -29,17 +29,17 @@ import cv2
 
 def rgb2yuv(rgb_file, yuv_file):
     img = cv2.imread(rgb_file)
-    yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+    yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
     yuvf = open(yuv_file, 'wb')
     yuv[..., 0].tofile(yuvf)	# Y
-    yuv[..., 1].tofile(yuvf)	# U
-    yuv[..., 2].tofile(yuvf)	# V
+    yuv[..., 2].tofile(yuvf)	# U
+    yuv[..., 1].tofile(yuvf)	# V
     yuvf.close()
     
 def yuv2rgb(yuv_file, rgb_file, w, h):
     yuv = np.fromfile(yuv_file, 'uint8', w*h*3).reshape([3, h, w]).transpose((1, 2, 0))
-    rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
-    cv2.imwrite(rgb_file, rgb)
+    bgr = cv2.cvtColor(yuv[..., [0, 2, 1]], cv2.COLOR_YCrCb2BGR)
+    cv2.imwrite(rgb_file, bgr)
 ```
 As only the 8x8 2D Bior-1.5 wavelet transform implementation and 8x8 Kaiser window (used for pixel-wise weighting in aggregation step) are provided in this program, the patch size only supports 8x8 at present, but it's easy to extend to other sizes by yourself, both square or rectangular. Note that the Bior-1.5 wavelet transform only support a size power of 2, e.g. 4, 8, 16, etc. But if you want to implement an arbitrary size of 2D transform, 2D DCT is quite a well choice. The code below shows the generation of  the 1D DCT-II kernel, and the corresponding 2D Kaiser window with the same patch size. You can also easily find some fast integer implementations of the DCT transform with butterfly optimization online, such as the HEVC or VVC reference software, but the size only supports a power of 2.
 
